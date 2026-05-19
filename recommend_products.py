@@ -9,13 +9,15 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from sklearn.model_selection import train_test_split
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 # 配置 Django 环境（如在 Django 项目中运行）
 os.environ["DJANGO_SETTINGS_MODULE"] = "product.settings"
 import django
 django.setup()
-from user.models import Product  # 确保 Product 模型存在
+from user.models import Product, User, ComprehensiveScore
 
 
 class AutoRec(nn.Module):
@@ -53,28 +55,70 @@ def loss_function(y_true, y_pred, mask, lamda, model):
 
 
 def recommend_by_autorec(
-    data_path="data.csv",
+    target_user_id=None,
     model_path="autorec1.pth",
     hidden_dim=50,
     lr=0.003,
     epochs=100,
     lamda=0.04,
     test_size=0.2,
-    random_state=42
+    random_state=42,
+    use_csv_fallback=True,
 ):
     """
-    使用 AutoRec 对最后一个用户进行 Top-N 推荐，并返回对应的 Product 对象列表。
-    同时跟踪并绘制每个 epoch 在测试集上的平滑 RMSE 曲线。
+    使用 AutoRec 对指定用户进行 Top-N 推荐，返回对应 Product 对象列表。
+    数据来源: user_comprehensivescore 表（综合评分）
+
+    参数:
+        target_user_id: 推荐目标用户ID。None=最后一个用户。
+        use_csv_fallback: 数据库无数据时回退到 data.csv
     """
-    # 1. 读取数据并初始化矩阵
-    df = pd.read_csv(data_path, encoding="gbk")
-    num_users = df.shape[0]
-    num_items = df.shape[1] - 1
-    user_item = pd.read_csv(data_path, encoding="gbk", index_col=0).fillna(0)
-    R = torch.from_numpy(user_item.values).float()
+    # 1. 从数据库加载综合评分矩阵
+    try:
+        scores = ComprehensiveScore.objects.select_related("user", "product").all()
+        if not scores.exists():
+            raise RuntimeError("user_comprehensivescore 表为空")
+
+        data = {}
+        users_map = {}
+        products_map = {}
+        for s in scores:
+            data[(s.user_id, s.product_id)] = s.score
+            users_map[s.user_id] = s.user.name
+            products_map[s.product_id] = s.product.name
+
+        user_ids = sorted(users_map.keys())
+        product_ids = sorted(products_map.keys())
+        uid_to_idx = {uid: i for i, uid in enumerate(user_ids)}
+        pid_to_idx = {pid: i for i, pid in enumerate(product_ids)}
+        user_names = [users_map[uid] for uid in user_ids]
+
+        matrix = np.zeros((len(user_ids), len(product_ids)))
+        for (uid, pid), score in data.items():
+            matrix[uid_to_idx[uid], pid_to_idx[pid]] = score
+
+        num_users, num_items = len(user_ids), len(product_ids)
+        user_item = pd.DataFrame(matrix, index=user_names, columns=[str(pid) for pid in product_ids])
+        R = torch.from_numpy(matrix).float()
+        print(f"数据来源: user_comprehensivescore 表 ({num_users} 用户 x {num_items} 物品)")
+    except RuntimeError as e:
+        if use_csv_fallback:
+            print(f"数据库无数据 ({e})，回退到 data.csv")
+            df = pd.read_csv("data.csv", encoding="gbk")
+            num_users = df.shape[0]
+            num_items = df.shape[1] - 1
+            user_item = pd.read_csv("data.csv", encoding="gbk", index_col=0).fillna(0)
+            user_names = list(user_item.index)
+            user_ids = list(range(num_users))
+            product_ids = list(user_item.columns)
+            R = torch.from_numpy(user_item.values).float()
+        else:
+            raise
 
     # 2. 划分训练/测试位置并构造 masks
     nonzero = [(u, i) for u in range(num_users) for i in range(num_items) if R[u, i] > 0]
+    if len(nonzero) < 10:
+        raise RuntimeError(f"有效评分太少 ({len(nonzero)} 条)")
     train_pos, test_pos = train_test_split(nonzero, test_size=test_size, random_state=random_state)
     train_mask = torch.zeros_like(R, dtype=torch.bool)
     test_mask = torch.zeros_like(R, dtype=torch.bool)
@@ -95,7 +139,7 @@ def recommend_by_autorec(
         model.load_state_dict(model_dict)
         print(f"Loaded {len(filtered)}/{len(checkpoint)} parameters from checkpoint.")
 
-    # 5. 训练阶段：跟踪训练损失和测试 RMSE
+    # 5. 训练阶段
     train_losses = []
     test_rmses  = []
 
@@ -140,25 +184,32 @@ def recommend_by_autorec(
     torch.save(model.state_dict(), model_path)
 
     # 6. 绘制测试集平滑 RMSE 曲线
-    # 使用滚动平均进行平滑（window=5）
     rmses_smooth = pd.Series(test_rmses).rolling(window=5, min_periods=1, center=True).mean()
     plt.figure()
     plt.plot(range(1, epochs + 1), rmses_smooth, linewidth=2)
     plt.title('Smoothed Test RMSE over Epochs')
-    plt.xlabel('Epoch')
-    plt.ylabel('Test RMSE')
+    plt.xlabel('Epoch'), plt.ylabel('Test RMSE')
     plt.grid(True)
-    plt.show()
+    plt.savefig('smoothed_rmse_curve.png')
+    print("RMSE 曲线已保存至 smoothed_rmse_curve.png")
 
     # 7. 最终推荐 Top-15
-    user_idx = num_users - 1
+    if target_user_id is not None:
+        user_idx = user_ids.index(target_user_id)
+        target_name = User.objects.get(id=target_user_id).name
+    else:
+        user_idx = num_users - 1
+        target_name = user_item.index[user_idx]
+
     scores = {}
     with torch.no_grad():
         for i in range(num_items):
             col = R[:, i].unsqueeze(0)
             scores[user_item.columns[i]] = model(col).squeeze()[user_idx].item()
     top15 = sorted(scores.items(), key=operator.itemgetter(1), reverse=True)[:15]
-    print("推荐结果 (item_id, score):", top15)
+    print(f"用户 [{target_name}] 的推荐结果 (item_id, score):")
+    for item_id, score in top15:
+        print(f"  {item_id}: {score:.4f}")
 
     # 8. 获取 Product 对象并返回
     recommended = []
@@ -169,5 +220,7 @@ def recommend_by_autorec(
 
 
 if __name__ == "__main__":
-    recs = recommend_by_autorec()
-    print("最终返回的 Product 对象列表：", recs)
+    recs = recommend_by_autorec(target_user_id=38)
+    print("\n最终推荐商品列表:")
+    for p in recs:
+        print(f"  [{p.id}] {p.name}")

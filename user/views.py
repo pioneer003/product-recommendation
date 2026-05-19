@@ -331,7 +331,7 @@ def user_recommend(request):
     cache_key = ITEM_CACHE.format(user_id=user_id)
     product_list = cache.get(cache_key)
     if product_list is None:
-        product_list = recommend_by_autorec()
+        product_list = recommend_by_autorec(target_user_id=user_id)
         cache.set(cache_key, product_list, 60 * 5)
         print('设置缓存')
     else:
