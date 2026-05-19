@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block right-panel-content %}
+    <table class="table">
+        <thead>
+        <tr>
+            <th>商品名</th>
+            <th>商家</th>
+            <th>标签</th>
+            <th>查看</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for i in product %}
+            <tr>
+                <td>{{ i.name}}</td>
+                <td>{{ i.director }}</td>
+                <td> {% if i.tags.all %}
+                    {% for tag in i.tags.all %}
+                    {{ tag }}
+                    {% endfor %}
+                    {% else %}
+                    无
+                {% endif %}
+                </td>
+                <td><a href="{% url 'product' i.id %}">查看</a></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+
+<button onclick="openPopup()"  class="uk-button submit-login" style="position:relative;left:900px;color:black">结算</button>
+<script>
+function openPopup() {
+  alert('结算成功')
+}
+</script>
+{% endblock %}

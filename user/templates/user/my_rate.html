@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block right-panel-content %}
+<table class="table">
+        <thead>
+                <tr>
+                <th>商品名</th>
+                <th>评分</th>
+                <th>时间</th>
+                </tr>
+        </thead>
+        <tbody>
+                {% for i in rate %}
+                <tr>
+                        <td>{{ i.product.name }}</td>
+                        <td>{{ i.mark }}</td>
+                        <td>{{ i.create_time }}</td>
+                </tr>
+                {% endfor %}
+        </tbody>
+</table>
+{% endblock %}
+

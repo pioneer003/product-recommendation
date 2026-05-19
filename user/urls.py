@@ -1,0 +1,31 @@
+from django.urls import path
+from user import views
+
+urlpatterns = [
+    path("", views.all_product, name="index"),
+    path("login/", views.login, name="login"),
+    path("register/", views.register, name="register"),
+    path("logout/", views.logout, name="logout"),
+    # path("item/", views.item, name="item"),
+    path("all_product/", views.all_product, name="all_product"),
+    path("product/<int:product_id>/", views.product, name="product"),
+    path("score/<int:product_id>/", views.score, name="score"),
+    path("comment/<int:product_id>/", views.commen, name="comment"),
+    path("good/<int:commen_id>/<int:product_id>/", views.good, name="good"),
+    path("collect/<int:product_id>/", views.collect, name="collect"),
+    path("decollect/<int:product_id>/", views.decollect, name="decollect"),
+    path("personal/", views.personal, name="personal"),
+    path("mycollect/", views.mycollect, name="mycollect"),
+    path("my_comments/", views.my_comments, name="my_comments"),
+    path("my_rate/", views.my_rate, name="my_rate"),
+    path("delete_comment/<int:comment_id>", views.delete_comment, name="delete_comment"),
+    path("hot_product/", views.hot_product, name="hot_product"),
+    path("most_view/", views.most_view, name="most_view"),
+    path("most_mark/", views.most_mark, name="most_mark"),
+    path("latest_product/", views.latest_product, name="latest_product"),
+    path("search/", views.search, name="search"),
+    path("kindof/", views.kindof, name="kindof"),
+    path("kind/<int:kind_id>/", views.kind, name="kind"),
+    path("random_reco/", views.reco_by_random, name="random_reco"),
+    path("item_recommend/", views.user_recommend, name="item_recommend"),
+]
